@@ -124,19 +124,19 @@ mod app {
     #[init]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) { // init::LateResources 
         let mut flash = cx.device.FLASH.constrain();
-        let mut rcc = cx.device.RCC.constrain();
+        let rcc = cx.device.RCC.constrain();
 
         let clocks = rcc.cfgr
-            .use_hse(8.mhz())
-            .hclk(72.mhz())
-            .sysclk(72.mhz())
-            .pclk1(36.mhz())
-            .pclk2(72.mhz())
+            .use_hse(8.MHz())
+            .hclk(72.MHz())
+            .sysclk(72.MHz())
+            .pclk1(36.MHz())
+            .pclk2(72.MHz())
             .freeze(&mut flash.acr);
 
 
 
-        let mut afio = cx.device.AFIO.constrain(&mut rcc.apb2);
+        let mut afio = cx.device.AFIO.constrain();
 
         let mut cp = cx.core;
 
@@ -152,8 +152,8 @@ mod app {
         //cp.DWT.enable_cycle_counter();
         
 
-        let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
-        let mut gpioc = cx.device.GPIOC.split(&mut rcc.apb2);
+        let mut gpioa = cx.device.GPIOA.split();
+        let mut gpioc = cx.device.GPIOC.split();
 
         //LED
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
@@ -168,14 +168,13 @@ mod app {
             (tx, rx),
             &mut afio.mapr,
             Config::default().baudrate(115200.bps()),
-            clocks,
-            &mut rcc.apb2,
+            clocks
         );
 
         let sent_start= b'S';
         block!(serial.write(sent_start)).ok();
 
-        let _dma1 = cx.device.DMA1.split(&mut rcc.ahb);
+        let _dma1 = cx.device.DMA1.split();
         
         // DMA channel selection depends on the peripheral:
         // - USART1: TX = 4, RX = 5
@@ -190,43 +189,35 @@ mod app {
         //let buf = singleton!(: [u8; 8] = [0; 8]).unwrap();
         //let (_, tx) = serial_dma_tx.write(b"The quick brown fox").wait();
 
-        
-        let mut can1 = {
-            #[cfg(not(feature = "connectivity"))]
-            let can = Can::new(cx.device.CAN1, &mut rcc.apb1, cx.device.USB);
-            #[cfg(feature = "connectivity")]
-            let can = Can::new(cx.device.CAN1, &mut rcc.apb1);
-        
-            let rx = gpioa.pa11.into_floating_input(&mut gpioa.crh);
-            let tx = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
-            can.assign_pins((tx, rx), &mut afio.mapr);
-        
-            bxcan::Can::new(can)
-        };
-        
-        // APB1 (PCLK1): 36MHz, Bit rate: 125kBit/s, Sample Point 87.5%
-        // Value was calculated with http://www.bittiming.can-wiki.info/
-        can1.modify_config().set_bit_timing(0x001c0011);
+        let can = Can::new(cx.device.CAN1, cx.device.USB);
 
-        // APB1 (PCLK1): 36MHz, Bit rate: 250kBit/s, Sample Point 87.5%
+        // Select pins for CAN1.
+        let can_rx_pin = gpioa.pa11.into_floating_input(&mut gpioa.crh);
+        let can_tx_pin = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
+        can.assign_pins((can_tx_pin, can_rx_pin), &mut afio.mapr);
+
+		// APB1 (PCLK1): 36MHz, Bit rate: 250kBit/s, Sample Point 87.5%
         // Value was calculated with http://www.bittiming.can-wiki.info/
-        can1.modify_config().set_bit_timing(0x001c0008);
-        
-        // Configure filters so that can frames can be received.
-        let mut filters = can1.modify_filters();
-        filters.enable_bank(0, Mask32::accept_all());
-        
-        
-        // Drop filters to leave filter configuraiton mode.
-        drop(filters);
-        
+        let mut can1 = bxcan::Can::builder(can)
+			.set_bit_timing(0x001c0008)
+            .leave_disabled();
+			
+		// APB1 (PCLK1): 36MHz, Bit rate: 125kBit/s, Sample Point 87.5%
+		// Value was calculated with http://www.bittiming.can-wiki.info/
+		//let mut can = bxcan::Can::builder(can)
+		//	.set_bit_timing(0x001c0011)
+        //    .leave_disabled();
+
+        can1.modify_filters().enable_bank(0, Mask32::accept_all());        
+ 
         // Sync to the bus and start normal operation.
         can1.enable_interrupts(
             Interrupts::TRANSMIT_MAILBOX_EMPTY | Interrupts::FIFO0_MESSAGE_PENDING,
         );
 
         // Split the peripheral into transmitter and receiver parts.
-        block!(can1.enable()).unwrap();
+        // block!(can1.enable()).unwrap();
+		nb::block!(can1.enable_non_blocking()).unwrap();
         
         let (can_tx, can_rx) = can1.split();
 
@@ -239,20 +230,6 @@ mod app {
 
         blinky::spawn().unwrap();
 
-        /*
-        init::LateResources {
-            can_tx,
-            can_tx_queue,
-            can_rx,
-            can_rx_queue,
-            //serial,
-            //serial_dma_rx,
-            //serial_dma_tx,
-            serial_rx,
-            serial_tx,
-            led
-        }
-        */
         (
             Shared {
                 can_tx_queue,
@@ -332,7 +309,7 @@ mod app {
     fn blinky(cx: blinky::Context) {
         // Periodic
         //blinky::spawn_after(Seconds(1_u32)).unwrap();
-        cx.local.led.toggle().ok();
+        cx.local.led.toggle();
         blinky::spawn_after(1.secs()).unwrap();
     }
 
@@ -342,25 +319,27 @@ mod app {
         let tx = cx.local.can_tx;
         let mut tx_queue = cx.shared.can_tx_queue;
 
+		tx.clear_interrupt_flags();
+
         tx_queue.lock(|tx_queue|
         {
-            tx.clear_interrupt_flags();
-
             // There is now a free mailbox. Try to transmit pending frames until either
             // the queue is empty or transmission would block the execution of this ISR.
             while let Some(frame) = tx_queue.peek() {
                 match tx.transmit(&frame.0) {
-                    Ok(None) => {
-                        // Frame was successfully placed into a transmit buffer.
-                        tx_queue.pop();
-                    }
-                    Ok(Some(pending_frame)) => {
-                        // A lower priority frame was replaced with our high priority frame.
-                        // Put the low priority frame back in the transmit queue.
-                        tx_queue.pop();
-                        tx_queue.push(PriorityFrame(pending_frame)).unwrap();
-                        rtic::pend(Interrupt::USB_HP_CAN_TX);
-                    }
+                    Ok(status) => match status.dequeued_frame() {
+                        None => {
+                            // Frame was successfully placed into a transmit buffer.
+                            tx_queue.pop();
+                        }
+                        Some(pending_frame) => {
+                            // A lower priority frame was replaced with our high priority frame.
+                            // Put the low priority frame back in the transmit queue.
+                            tx_queue.pop();                        
+                            tx_queue.push(PriorityFrame(pending_frame.clone())).unwrap();
+                            rtic::pend(Interrupt::USB_HP_CAN_TX);
+                        }
+                    },
                     Err(nb::Error::WouldBlock) => break,
                     Err(_) => unreachable!(),
                 }
@@ -372,17 +351,19 @@ mod app {
     fn can_rx0(cx: can_rx0::Context) {
         let mut rx_queue = cx.shared.can_rx_queue;
         // Echo back received packages with correct priority ordering.
-        rx_queue.lock(|rx_queue| {
-            loop {
-                match cx.local.can_rx.receive() {
-                    Ok(frame) => {
-                        rx_queue.push(PriorityFrame(frame)).unwrap();
-                    }
-                    Err(nb::Error::WouldBlock) => break,
-                    Err(nb::Error::Other(_)) => {} // Ignore overrun errors.
+        
+        loop {
+            match cx.local.can_rx.receive() {
+                Ok(frame) => {
+					rx_queue.lock(|rx_queue| {
+						rx_queue.push(PriorityFrame(frame)).unwrap();
+					});
                 }
+                Err(nb::Error::WouldBlock) => break,
+                Err(nb::Error::Other(_)) => {} // Ignore overrun errors.
             }
-        });
+        }
+        
     }
 
 }
