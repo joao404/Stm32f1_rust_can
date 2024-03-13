@@ -27,13 +27,7 @@
 
 use panic_halt as _;
 
-//use cortex_m::singleton;
-//use cortex_m_semihosting::{hprintln};
-
 use bxcan::Frame;
-
-//use std::sync::mpsc;
-//use cortex_m_rt::entry;
 
 use core::cmp::Ordering;
 
