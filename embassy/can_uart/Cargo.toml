@@ -1,0 +1,40 @@
+[package]
+edition = "2021"
+name = "embassy-stm32-example"
+version = "0.1.0"
+authors = ["Marcel Maage <marcel@maage.online>"]
+resolver = "2"
+
+[dependencies]
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+embedded-io = "0.6.1"
+embedded-io-async = "0.6.1"
+embedded-storage = "0.3.1"
+
+cortex-m-rt = "0.7.3"
+
+
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = ["task-arena-size-1024", "arch-cortex-m", "executor-thread", "defmt", "integrated-timers", "executor-interrupt"] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git"}
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt", "defmt-timestamp-uptime"] }
+
+cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
+#embassy-stm32 = { version = "0.1.0", features = ["stm32f103c8", "defmt", "unstable-pac", "memory-x", "time-driver-any" ]  }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", features = ["stm32f103c8", "defmt", "unstable-pac", "memory-x", "time-driver-any" ]  }
+
+static_cell = "2.0.0"
+
+[profile.release]
+opt-level = 'z' # turn on maximum optimizations. We only have 64kB
+lto = true      # Link-time-optimizations for further size reduction
+
+[profile.dev]
+codegen-units = 1
+debug = 2
+incremental = false
+opt-level = 3 # <-

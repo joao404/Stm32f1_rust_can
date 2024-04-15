@@ -1,0 +1,18 @@
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = "probe-rs run --chip STM32F103C8"
+#runner = 'gdb-multiarch'
+# runner = "gdb-multiarch -q -x openocd.gdb"
+#runner = "arm-none-eabi-gdb -q -x openocd.gdb"
+
+[build]
+#target = "thumbv7em-none-eabihf"
+target = "thumbv7m-none-eabi"
+
+rustflags = [
+  # use the Tlink.x scrip from the cortex-m-rt crate
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+[env]
+DEFMT_LOG = "info"
